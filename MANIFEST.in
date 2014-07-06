@@ -1,0 +1,4 @@
+include CHANGES
+include LICENSE
+include README.rst
+recursive-include docs *.txt
