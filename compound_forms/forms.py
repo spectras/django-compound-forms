@@ -7,6 +7,46 @@ from collections import OrderedDict
 
 class SubFormsProxyMixin(BaseForm):
     """ Base form that handles sub-forms with optional linked fields """
+    linked_fields = ()
+
+    def __init__(self, *args, **kwargs):
+        super(SubFormsProxyMixin, self).__init__(*args, **kwargs)
+        self.pull_linked_fields()
+
+    def pull_linked_fields(self):
+        """ Pull initial values from sub-forms (and checks they are identical) """
+        assert (field in self.fields for field in self.linked_fields)
+        if not self.is_bound:
+            for name in self.linked_fields:
+                if name in self.initial: # if an initial value is explicitly
+                    continue             # specified, simply use it
+                initials = tuple(
+                    form.initial.get(name, form.fields[name].initial)
+                    for form in self.forms.values()
+                    if name in form.fields
+                )
+                if initials.count(initials[0]) != len(initials):
+                    raise ValueError('Initial sub-form values differ for '
+                                     'linked field %s: %r' % (name, initials))
+                self.initial[name] = initials[0]
+
+    def push_linked_fields(self):
+        """ Push raw field data to sub-forms and let them do the cleaning later """
+        assert (field in self.fields for field in self.linked_fields)
+        if self.is_bound:
+            for form in self.forms.values():
+                form.data = form.data.copy() # we need a mutable copy
+                form.data.update(dict(
+                    (form.add_prefix(name), self._raw_value(name))
+                    for name in self.linked_fields
+                    if name in form.fields
+                ))
+
+    def full_clean(self):
+        if self.is_bound:
+            self.push_linked_fields()
+        super(SubFormsProxyMixin, self).full_clean()
+
     def is_valid(self):
         return (super(SubFormsProxyMixin, self).is_valid() and
                 all(form.is_valid() for form in self.forms.values()))
@@ -56,7 +96,7 @@ class SubFormsBuildMixin(BaseForm):
 
 class ModelSubFormsMixin(BaseForm):
     def __init__(self, *args, **kwargs):
-        self.instances = kwargs.pop('instances')
+        self.instances = kwargs.pop('instances', {})
         super(ModelSubFormsMixin, self).__init__(*args, **kwargs)
 
     def _construct_form(self, name, **kwargs):
@@ -75,26 +115,6 @@ class ModelSubFormsMixin(BaseForm):
 
 ##############################################################################
 
-class LinkedFieldsMixin(BaseForm):
-    linked_fields = ()
-
-    def push_linked_fields(self):
-        assert (field in self.fields for field in self.linked_fields)
-        for form in self.forms.values():
-            form.data = form.data.copy() # we need a mutable copy
-            form.data.update(dict(
-                (form.add_prefix(name), self._raw_value(name))
-                for name in self.linked_fields
-                if name in form.fields
-            ))
-
-    def full_clean(self):
-        if self.is_bound:
-            self.push_linked_fields()
-        super(LinkedFieldsMixin, self).full_clean()
-
-##############################################################################
-
 class MergingFormMixin(BaseForm):
     """ A BaseCompoundForm that allows access to subforms through field aliases """
     def __init__(self, *args, **kwargs):
@@ -105,11 +125,26 @@ class MergingFormMixin(BaseForm):
     def _make_field_aliases(self):
         for form_name, form in self.forms.items():
             for field_name, field in form.fields.items():
-                if field_name in getattr(self, 'linked_fields', ()):
+                if field_name in self.linked_fields:
                     continue
                 alias = self._get_alias(form_name, field_name)
                 self.fields[alias] = field
                 self.field_form[alias] = (form, field_name)
+
+    def _construct_form(self, name, **kwargs):
+        defaults = {}
+        if 'initial' in kwargs: # extract initial for this form
+            initial = {}
+            for key, value in kwargs['initial'].items():
+                try:
+                    form_name, field_name = key.split('.')
+                except ValueError:
+                    continue
+                if form_name == name and field_name not in self.linked_fields:
+                    initial[field_name] = value
+            defaults['initial'] = initial
+        defaults.update(kwargs)
+        return super(MergingFormMixin, self)._construct_form(name, **defaults)
 
     def __getitem__(self, name):
         """ Retrieve the field by name, merging own field with content form's """
@@ -129,27 +164,33 @@ class MergingFormMixin(BaseForm):
         """ Merge in subform errors and cleaned_data under their alias names """
         super(MergingFormMixin, self)._clean_form()
         for form_name, form in self.forms.items():
-            self._errors.update((NON_FIELD_ERRORS if name == NON_FIELD_ERRORS else
-                                self._get_alias(form_name, name), errors)
-                                for name, errors in form.errors.items())
+            for field_name, errors in form.errors.items():
+                if field_name != NON_FIELD_ERRORS:
+                    field_name = self._get_alias(form_name, field_name)
+                self._errors.setdefault(field_name, set()).update(errors)
             self.cleaned_data.update((self._get_alias(form_name, name), data)
-                                        for name, data in form.cleaned_data.items())
+                                     for name, data in form.cleaned_data.items()
+                                     if name not in self.linked_fields)
 
     @property
     def changed_data(self):
         """ Merge in subform's changed_data """
-        ret = super(MergingFormMixin, self).changed_data
-        for form_name, form in self.forms.items():
-            ret.extend(self._get_alias(form_name, name) for name in form.changed_data)
-        return ret
+        if self._changed_data is None:
+            ret = set(super(MergingFormMixin, self).changed_data)
+            for form_name, form in self.forms.items():
+                ret.update(self._get_alias(form_name, name) for name in form.changed_data)
+            self._changed_data = tuple(ret)
+        return self._changed_data
 
     def _get_alias(self, form_name, field_name):
         """ Compute the alias for a given form and field names """
+        if field_name in self.linked_fields:
+            return field_name
         return '%s.%s' % (form_name, field_name)
 
 ##############################################################################
 
-class BaseProxyForm(SubFormsProxyMixin, LinkedFieldsMixin):
+class BaseProxyForm(SubFormsProxyMixin):
     """ Compound form that proxies fields to its subforms """
     def __init__(self, *args, **kwargs):
         self.forms = kwargs.pop('forms')
@@ -165,7 +206,8 @@ class ProxyForm(Form, BaseProxyForm):
 class MergingProxyForm(Form, BaseMergingProxyForm):
     pass
 
-class BaseCompoundForm(SubFormsBuildMixin, SubFormsProxyMixin, LinkedFieldsMixin):
+
+class BaseCompoundForm(SubFormsBuildMixin, SubFormsProxyMixin):
     """ Compound form that builds subforms and proxies fields to them """
     pass
 
@@ -183,3 +225,11 @@ class MergingCompoundForm(Form, BaseMergingCompoundForm):
 
 class MergingCompoundModelForm(Form, ModelSubFormsMixin, BaseMergingCompoundForm):
     pass
+
+def compoundform_factory(forms, base=MergingCompoundForm, linked_fields=None):
+    attrs = {
+        'form_classes': forms,
+    }
+    if linked_fields is not None:
+        attrs['linked_fields'] = linked_fields
+    return type(base.__name__, (base,), attrs)
