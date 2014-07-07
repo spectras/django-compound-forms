@@ -9,7 +9,6 @@ sys.path.insert(0, os.path.join(root, 'tests', 'project'))
 
 import django
 from django.test.runner import DiscoverRunner
-from django.test.utils import setup_test_environment, teardown_test_environment
 
 def runtests():
     try:
