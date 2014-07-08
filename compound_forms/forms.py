@@ -10,23 +10,24 @@ class SubFormsProxyMixin(BaseForm):
     linked_fields = OrderedDict()
 
     def __init__(self, *args, **kwargs):
+        pull_linked_fields = kwargs.pop('pull_linked_fields', True)
         super(SubFormsProxyMixin, self).__init__(*args, **kwargs)
         for name, field in self.linked_fields.items():
-            if field is None:
-                if name not in self.fields:
-                    raise KeyError('No field %r in %r', name, self)
-            else:
+            if field is not None:
                 self.fields[name] = field
-        self.pull_linked_fields()
+        if pull_linked_fields:
+            self.pull_linked_fields()
 
     def pull_linked_fields(self):
         """ Pull initial values from sub-forms (and checks they are identical) """
         if not self.is_bound:
-            for name, field in self.linked_fields.items():
+            for name in self.linked_fields.keys():
                 if name in self.initial: # if an initial value is explicitly
                     continue             # specified, simply use it
+                if name not in self.fields:  # field will be added by add_field
+                    continue                 # on some formset, just skip pulling it
                 initials = tuple(
-                    form.initial.get(name, field.initial)
+                    form.initial.get(name, self.fields[name].initial)
                     for form in self.forms.values()
                     if name in form.fields
                 )

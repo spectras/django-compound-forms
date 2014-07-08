@@ -42,6 +42,9 @@ class InlineSubFormSetsMixin(SubFormSetsBuildMixin):
     def __init__(self, *args, **kwargs):
         self.instances = kwargs.pop('instances', {})
         super(InlineSubFormSetsMixin, self).__init__(*args, **kwargs)
+        for name in self.instances:
+            if not name in self.formsets:
+                raise KeyError('Instance for unkown formset %r', name)
 
     def _construct_formset(self, name, **kwargs):
         defaults = {
@@ -99,13 +102,13 @@ class SubFormSetsProxyMixin(BaseFormSet):
             if not first:
                 if formset.initial_form_count() != len(groups):
                     raise InvalidFormsetsError(
-                        'formsets do not have the same number of initial form groups: %d != %d',
-                        formset.initial_form_count(), len(groups)
+                        'formsets do not have the same number of initial form groups: %d != %d' %
+                        (formset.initial_form_count(), len(groups))
                     )
                 if len(formset.extra_forms) != len(extras):
                     raise InvalidFormsetsError(
-                        'formsets do not have the same number of extra forms: %d != %d',
-                        len(formset.extra_forms), len(extras)
+                        'formsets do not have the same number of extra forms: %d != %d' %
+                        (len(formset.extra_forms), len(extras))
                     )
 
             # Simply group extra forms by their index
@@ -193,3 +196,11 @@ class CompoundFormSet(SubFormSetsBuildMixin, SubFormSetsProxyMixin, BaseFormSet)
 
 class CompoundInlineFormSet(InlineSubFormSetsMixin, SubFormSetsProxyMixin, BaseFormSet):
     pass
+
+def compoundformset_factory(formsets, base=CompoundFormSet, formset_group_fields=None):
+    attrs = {
+        'formset_classes': formsets,
+    }
+    if formset_group_fields is not None:
+        attrs['formset_group_fields'] = formset_group_fields
+    return type(base.__name__, (base,), attrs)
