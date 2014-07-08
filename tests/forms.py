@@ -190,14 +190,14 @@ class BasicCompoundFormTest(NormalFixture, OtherFixture, TestCase):
         self.assertEqual(len(form.errors), 0)
 
         # Check the forms can be saved
-        normal = form.forms['normal'].save()
-        other = form.forms['other'].save()
+        result = form.save()
+        self.assertIs(result['normal'], normal)
         self.assertEqual(normal.pk, self.normal_id[1])
         self.assertEqual(normal.common, 'updated_nc')
         self.assertEqual(normal.field_a, NORMAL[1].field_a)
-        self.assertNotIn(other.pk, (None,) + tuple(self.other_id.values()))
-        self.assertEqual(other.common, 'created_oc')
-        self.assertEqual(other.field_a, 'created_ofa')
+        self.assertNotIn(result['other'].pk, (None,) + tuple(self.other_id.values()))
+        self.assertEqual(result['other'].common, 'created_oc')
+        self.assertEqual(result['other'].field_a, 'created_ofa')
 
 
 class LinkedCompoundFormTest(NormalFixture, OtherFixture, TestCase):
@@ -272,8 +272,9 @@ class LinkedCompoundFormTest(NormalFixture, OtherFixture, TestCase):
         self.assertCountEqual(form.changed_data, ('common', 'other.field_a'))
 
         # Check the forms can be saved
-        normal = form.forms['normal'].save()
-        other = form.forms['other'].save()
+        result = form.save()
+        self.assertIs(result['normal'], normal)
+        self.assertIs(result['other'], other)
         self.assertEqual(normal.pk, self.normal_id[1])
         self.assertEqual(normal.common, 'updated_common')
         self.assertEqual(normal.field_a, NORMAL[1].field_a)

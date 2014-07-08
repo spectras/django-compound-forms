@@ -1,17 +1,19 @@
 from django.forms import CharField
 from django.test import TestCase
 from collections import OrderedDict
-from compound_forms.formsets import ProxyFormSet, CompoundInlineFormSet, InvalidFormsetsError
+from compound_forms.formsets import (ProxyFormSet, CompoundInlineFormSet,
+                                     InvalidFormsetsError, compoundformset_factory)
 
 from app.models import Normal, Other
-from app.forms import NormalFormset, OtherFormset
+from app.forms import (NormalFormset, NormalRelatedFormset,
+                       OtherFormset, OtherRelatedFormset)
 from .data import NORMAL, NORMALREL, OTHER, OTHERREL
 from .fixtures import (NormalFixture, NormalRelatedFixture,
                        OtherFixture, OtherRelatedFixture)
 from .formdata import FormData
 
 
-class ProxyFormSetTest(NormalFixture, OtherFixture, TestCase):
+class ProxyFormSetTests(NormalFixture, OtherFixture, TestCase):
     """ Proxy formsets act as proxy towards already existing formsets """
     item_count = 2
     normal_count = other_count = item_count
@@ -19,7 +21,7 @@ class ProxyFormSetTest(NormalFixture, OtherFixture, TestCase):
     def setUp(self):
         assert self.normal_count == self.other_count, 'querysets must have same length'
         assert NormalFormset.extra == OtherFormset.extra, 'subformsets must have same length'
-        super(ProxyFormSetTest, self).setUp()
+        super(ProxyFormSetTests, self).setUp()
 
     def _get_formset(self, normal, other, **kwargs):
         ''' Helper function to build the form '''
@@ -165,8 +167,8 @@ class ProxyFormSetTest(NormalFixture, OtherFixture, TestCase):
         self.assertTrue(formset.has_changed())
 
 
-def CompoundInlineFormSetTests(NormalRelatedFixture, NormalFixture,
-                               OtherRelatedFixtre, OtherFixture, TestCase):
+class CompoundInlineFormSetTests(NormalRelatedFixture, NormalFixture,
+                                 OtherRelatedFixture, OtherFixture, TestCase):
     """ Compound formsets manage the lifetime of their subformsets.
         Inline variant assumes those are all inline formsets
     """
@@ -174,6 +176,120 @@ def CompoundInlineFormSetTests(NormalRelatedFixture, NormalFixture,
     normalrel_count = otherrel_count = 4
 
     def _get_formset(self, **kwargs):
-        pass #TODO
+        formset = compoundformset_factory(
+            OrderedDict((
+                ('normalrel', NormalRelatedFormset),
+                ('otherrel', OtherRelatedFormset),
+            )),
+            base=CompoundInlineFormSet,
+            formset_group_fields=OrderedDict((
+                ('common', CharField(max_length=255, required=False)),
+            )),
+        )
+        return formset(**kwargs)
+
+    def test_compound_create(self):
+        """ Test formsets are created correctly, and regular formset interface works """
+        normal = Normal.objects.get(pk=self.normal_id[1])
+        other = Other.objects.get(pk=self.other_id[2])
+        formset = self._get_formset(instances={'normalrel': normal, 'otherrel': other})
+
+        # Check basic formset structure
+        self.assertCountEqual(formset.formsets, ('normalrel', 'otherrel'))
+        #self.assertEqual(formset.formsets['normalrel'].prefix, 'normalrel')
+        #self.assertEqual(formset.formsets['otherrel'].prefix, 'otherrel')
+        self.assertEqual(len(formset.forms), 2 + NormalRelatedFormset.extra)
+        self.assertEqual(formset.total_form_count(), 2 + NormalRelatedFormset.extra)
+        self.assertEqual(len(formset.initial_forms), 2)
+        self.assertEqual(formset.initial_form_count(), 2)
+        self.assertEqual(len(formset.extra_forms), NormalRelatedFormset.extra)
+
+        # Check instances where correctly assigned
+        self.assertIs(formset.formsets['normalrel'].instance, normal)
+        self.assertIs(formset.formsets['otherrel'].instance, other)
+
+        # Check forms content - grouping fields should have been made linked_fields
+        for index, form in enumerate(formset.initial_forms, 1):
+            self.assertCountEqual(form.forms, ('normalrel', 'otherrel'))
+            self.assertEqual(form['common'].value(), NORMALREL[2*index-1].common)
+            self.assertEqual(form['normalrel.field_a'].value(), NORMALREL[2*index-1].field_a)
+            self.assertEqual(form['otherrel.field_a'].value(), OTHERREL[2*index-1].field_a)
+            self.assertRaises(KeyError, form.__getitem__, 'normalrel.common')
+            self.assertRaises(KeyError, form.__getitem__, 'otherrel.common')
+        for form in formset.extra_forms:
+            self.assertCountEqual(form.forms, ('normalrel', 'otherrel'))
+
+    def test_compound_save_update(self):
+        normal = Normal.objects.get(pk=self.normal_id[1])
+        other = Other.objects.get(pk=self.other_id[2])
+        formset = self._get_formset(instances={'normalrel': normal, 'otherrel': other})
+
+        data = FormData(formset)
+        data.set_formset_field(formset, 0, 'common', 'updated_common_1')
+        data.set_formset_field(formset, 0, 'normalrel.field_a', 'updated_fa_1')
+        data.set_formset_field(formset, 1, 'otherrel.field_a', 'updated_fa_2')
+
+        formset = self._get_formset(instances={'normalrel': normal, 'otherrel': other},
+                                    data=data)
+
+        self.assertTrue(formset.is_valid())
+        formset.save()
+
+        nrelqs = normal.related_set.order_by('id')
+        orelqs = other.related_set.order_by('id')
+        self.assertEqual(len(nrelqs), 2)
+        self.assertEqual(len(orelqs), 2)
+
+        self.assertEqual(nrelqs[0].common, 'updated_common_1')
+        self.assertEqual(nrelqs[0].field_a, 'updated_fa_1')
+        self.assertEqual(orelqs[0].common, 'updated_common_1')
+        self.assertEqual(orelqs[0].field_a, OTHERREL[1].field_a)
+        self.assertEqual(nrelqs[1].common, NORMALREL[3].common)
+        self.assertEqual(nrelqs[1].field_a, NORMALREL[3].field_a)
+        self.assertEqual(orelqs[1].common, OTHERREL[3].common)
+        self.assertEqual(orelqs[1].field_a, 'updated_fa_2')
 
 
+    def test_compound_save_delete(self):
+        normal = Normal.objects.get(pk=self.normal_id[1])
+        other = Other.objects.get(pk=self.other_id[2])
+        formset = self._get_formset(instances={'normalrel': normal, 'otherrel': other})
+
+        data = FormData(formset)
+        data.set_formset_field(formset, 0, 'DELETE', 'on')
+
+        formset = self._get_formset(instances={'normalrel': normal, 'otherrel': other},
+                                    data=data)
+
+        self.assertTrue(formset.is_valid())
+        formset.save()
+
+        nrelqs = normal.related_set.order_by('id')
+        orelqs = other.related_set.order_by('id')
+        self.assertEqual(len(nrelqs), 1)
+        self.assertEqual(len(orelqs), 1)
+        self.assertCountEqual(normal.related_set.values_list('id', flat=True),
+                              (self.normalrel_id[3],))
+        self.assertCountEqual(other.related_set.values_list('id', flat=True),
+                              (self.otherrel_id[3],))
+
+    def test_compound_save_create(self):
+        normal = Normal.objects.get(pk=self.normal_id[1])
+        other = Other.objects.get(pk=self.other_id[2])
+        formset = self._get_formset(instances={'normalrel': normal, 'otherrel': other})
+
+        data = FormData(formset)
+        data.set_formset_field(formset, 2, 'common', 'created_common')
+        data.set_formset_field(formset, 2, 'normalrel.field_a', 'created_nfa')
+        data.set_formset_field(formset, 2, 'otherrel.field_a', 'created_ofa')
+
+        formset = self._get_formset(instances={'normalrel': normal, 'otherrel': other},
+                                    data=data)
+
+        self.assertTrue(formset.is_valid())
+        formset.save()
+
+        nrelqs = normal.related_set.order_by('id')
+        orelqs = other.related_set.order_by('id')
+        self.assertEqual(len(nrelqs), 3)
+        self.assertEqual(len(orelqs), 3)
