@@ -1,5 +1,4 @@
 from django.forms import CharField
-from django.test import TestCase
 from collections import OrderedDict
 from compound_forms.forms import (MergingProxyForm, MergingCompoundModelForm,
                                   compoundform_factory)
@@ -9,6 +8,7 @@ from app.forms import NormalForm, OtherForm
 from .data import NORMAL, OTHER
 from .fixtures import NormalFixture, OtherFixture
 from .formdata import FormData
+from .utils import TestCase
 
 
 class BasicProxyFormTest(NormalFixture, OtherFixture, TestCase):

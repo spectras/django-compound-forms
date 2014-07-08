@@ -1,5 +1,4 @@
 from django.forms import CharField
-from django.test import TestCase
 from collections import OrderedDict
 from compound_forms.formsets import (ProxyFormSet, CompoundInlineFormSet,
                                      InvalidFormsetsError, compoundformset_factory)
@@ -11,6 +10,7 @@ from .data import NORMAL, NORMALREL, OTHER, OTHERREL
 from .fixtures import (NormalFixture, NormalRelatedFixture,
                        OtherFixture, OtherRelatedFixture)
 from .formdata import FormData
+from .utils import TestCase
 
 
 class ProxyFormSetTests(NormalFixture, OtherFixture, TestCase):

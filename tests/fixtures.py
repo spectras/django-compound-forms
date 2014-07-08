@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-from django.test import TestCase
 from .data import NORMAL, NORMALREL, OTHER, OTHERREL
+from .utils import TestCase
 from app.models import Normal, NormalRelated, Other, OtherRelated
-
 
 class Fixture(TestCase):
     def setUp(self):

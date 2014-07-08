@@ -5,7 +5,6 @@ python:
   - 3.4
 env:
   - DJANGO=django==1.6.4
-  - DJANGO=https://github.com/django/django/tarball/stable/1.7.x
 
 install:
   - pip install -q $DJANGO && pip install sphinx argparse
