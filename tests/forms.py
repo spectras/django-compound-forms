@@ -206,12 +206,12 @@ class LinkedCompoundFormTest(NormalFixture, OtherFixture, TestCase):
     other_count = 1
 
     def _get_form(self, **kwargs):
-        class LinkedCompoundForm(MergingCompoundModelForm):
-            form_classes = OrderedDict((('normal', NormalForm),
-                                        ('other', OtherForm)))
-            linked_fields=('common',)
-            common = CharField(max_length=255, required=False)
-        return LinkedCompoundForm(**kwargs)
+        form = compoundform_factory(
+            OrderedDict((('normal', NormalForm), ('other', OtherForm))),
+            linked_fields=OrderedDict((('common', CharField(max_length=255, required=False)),)),
+            base=MergingCompoundModelForm,
+        )
+        return form(**kwargs)
 
     def test_linked_compound_create(self):
         """ Create an unbound compound form to check fields are mapped correctly """

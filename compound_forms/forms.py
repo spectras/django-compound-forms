@@ -7,17 +7,20 @@ from collections import OrderedDict
 
 class SubFormsProxyMixin(BaseForm):
     """ Base form that handles sub-forms with optional linked fields """
-    linked_fields = ()
+    linked_fields = OrderedDict()
 
     def __init__(self, *args, **kwargs):
         super(SubFormsProxyMixin, self).__init__(*args, **kwargs)
+        self.fields.update(OrderedDict((name, field)
+                                       for name, field in self.linked_fields.items()
+                                       if field is not None))
         self.pull_linked_fields()
 
     def pull_linked_fields(self):
         """ Pull initial values from sub-forms (and checks they are identical) """
-        assert (field in self.fields for field in self.linked_fields)
+        assert (field in self.fields for field in self.linked_fields.keys())
         if not self.is_bound:
-            for name in self.linked_fields:
+            for name in self.linked_fields.keys():
                 if name in self.initial: # if an initial value is explicitly
                     continue             # specified, simply use it
                 initials = tuple(
@@ -32,13 +35,13 @@ class SubFormsProxyMixin(BaseForm):
 
     def push_linked_fields(self):
         """ Push raw field data to sub-forms and let them do the cleaning later """
-        assert (field in self.fields for field in self.linked_fields)
+        assert (field in self.fields for field in self.linked_fields.keys())
         if self.is_bound:
             for form in self.forms.values():
                 form.data = form.data.copy() # we need a mutable copy
                 form.data.update(dict(
                     (form.add_prefix(name), self._raw_value(name))
-                    for name in self.linked_fields
+                    for name in self.linked_fields.keys()
                     if name in form.fields
                 ))
 
@@ -106,9 +109,9 @@ class ModelSubFormsMixin(BaseForm):
         defaults.update(kwargs)
         return super(ModelSubFormsMixin, self)._construct_form(name, **defaults)
 
-    def save(self, only=None, commit=True):
+    def save(self, only=None, **kwargs):
         keys = self.forms.keys() if only is None else only
-        return OrderedDict((name, self._save_form(name, commit=commit)) for name in keys)
+        return OrderedDict((name, self._save_form(name, **kwargs)) for name in keys)
 
     def _save_form(self, name, **kwargs):
         return self.forms[name].save(**kwargs)
@@ -194,7 +197,8 @@ class BaseProxyForm(SubFormsProxyMixin):
     """ Compound form that proxies fields to its subforms """
     def __init__(self, *args, **kwargs):
         self.forms = kwargs.pop('forms')
-        self.linked_fields = self.linked_fields + kwargs.pop('linked_fields', ())
+        self.linked_fields = self.linked_fields.copy()
+        self.linked_fields.update(kwargs.pop('linked_fields', {}))
         super(BaseProxyForm, self).__init__(*args, **kwargs)
 
 class BaseMergingProxyForm(MergingFormMixin, BaseProxyForm):
