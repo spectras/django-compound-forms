@@ -4,9 +4,17 @@ python:
   - 3.3
   - 3.4
 env:
+  - DJANGO=django==1.5.8
   - DJANGO=django==1.6.4
+  - DJANGO=https://github.com/django/django/tarball/stable/1.7.x
 
 install:
   - pip install -q $DJANGO && pip install sphinx argparse
   - python setup.py -q install
 script: python runtests.py
+matrix:
+  exclude:
+    - python: 3.4
+      env: DJANGO=django==1.5.8
+    - python: 3.4
+      env: DJANGO=django==1.6.4

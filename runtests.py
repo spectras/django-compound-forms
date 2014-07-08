@@ -2,20 +2,23 @@
 
 import os, sys
 
-os.environ['DJANGO_SETTINGS_MODULE'] = 'tests.project.settings'
+os.environ['DJANGO_SETTINGS_MODULE'] = 'test_project.settings'
 root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, root)
-sys.path.insert(0, os.path.join(root, 'tests', 'project'))
+sys.path.insert(0, os.path.join(root, 'test_project'))
 
 import django
-from django.test.runner import DiscoverRunner
+if django.VERSION >= (1, 6):
+    from django.test.runner import DiscoverRunner as Runner
+else:
+    from django.test.simple import DjangoTestSuiteRunner as Runner
 
 def runtests():
     try:
         django.setup()
     except AttributeError:
         pass
-    runner = DiscoverRunner(
+    runner = Runner(
         pattern='*.py',
         interactive=False,
         failfast=False,

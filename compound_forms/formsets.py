@@ -81,6 +81,10 @@ class SubFormSetsProxyMixin(BaseFormSet):
             raise ValidationError('Invalid management form')
         return form
 
+    def _construct_forms(self):
+        """ On django < 1.6, this method was used instaed of a cached property """
+        pass
+
     @cached_property
     def forms(self):
         #TODO: peek at initial data to guess the number beforehand and alter
@@ -166,6 +170,11 @@ class SubFormSetsProxyMixin(BaseFormSet):
             self.clean()
         except ValidationError as e:
             self._non_form_errors = self.error_class(e.messages)
+
+    @property
+    def min_num(self):
+        """ Django >= 1.7 """
+        return max(formset.min_num for formset in self.formsets.values())
 
     @property
     def can_order(self):
