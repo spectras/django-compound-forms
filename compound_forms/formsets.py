@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
-from django.forms.formsets import BaseFormSet
+from django.forms.formsets import (BaseFormSet,
+                                   ORDERING_FIELD_NAME, DELETION_FIELD_NAME)
 from django.utils.functional import cached_property
 from collections import OrderedDict
 
@@ -117,8 +118,10 @@ class SubFormSetsProxyMixin(BaseFormSet):
             first = False
 
         linked_fields = self.formset_group_fields.copy()
+        if self.can_order:
+            linked_fields[ORDERING_FIELD_NAME] = None
         if self.can_delete:
-            linked_fields['DELETE'] = None
+            linked_fields[DELETION_FIELD_NAME] = None
 
         forms = (tuple(self._construct_form(i, forms=group, linked_fields=linked_fields)
                        for i, group in enumerate(groups.values()))

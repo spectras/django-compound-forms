@@ -11,20 +11,22 @@ class SubFormsProxyMixin(BaseForm):
 
     def __init__(self, *args, **kwargs):
         super(SubFormsProxyMixin, self).__init__(*args, **kwargs)
-        self.fields.update(OrderedDict((name, field)
-                                       for name, field in self.linked_fields.items()
-                                       if field is not None))
+        for name, field in self.linked_fields.items():
+            if field is None:
+                if name not in self.fields:
+                    raise KeyError('No field %r in %r', name, self)
+            else:
+                self.fields[name] = field
         self.pull_linked_fields()
 
     def pull_linked_fields(self):
         """ Pull initial values from sub-forms (and checks they are identical) """
-        assert (field in self.fields for field in self.linked_fields.keys())
         if not self.is_bound:
-            for name in self.linked_fields.keys():
+            for name, field in self.linked_fields.items():
                 if name in self.initial: # if an initial value is explicitly
                     continue             # specified, simply use it
                 initials = tuple(
-                    form.initial.get(name, form.fields[name].initial)
+                    form.initial.get(name, field.initial)
                     for form in self.forms.values()
                     if name in form.fields
                 )
@@ -35,7 +37,6 @@ class SubFormsProxyMixin(BaseForm):
 
     def push_linked_fields(self):
         """ Push raw field data to sub-forms and let them do the cleaning later """
-        assert (field in self.fields for field in self.linked_fields.keys())
         if self.is_bound:
             for form in self.forms.values():
                 form.data = form.data.copy() # we need a mutable copy
@@ -46,17 +47,10 @@ class SubFormsProxyMixin(BaseForm):
                 ))
 
     def full_clean(self):
+        """ Hook field data pushing before form cleaning kicks in """
         if self.is_bound:
             self.push_linked_fields()
         super(SubFormsProxyMixin, self).full_clean()
-
-    def is_valid(self):
-        return (super(SubFormsProxyMixin, self).is_valid() and
-                all(form.is_valid() for form in self.forms.values()))
-
-    def has_changed(self):
-        return (super(SubFormsProxyMixin, self).has_changed() or
-                any(form.has_changed() for form in self.forms.values()))
 
     @property
     def media(self):
