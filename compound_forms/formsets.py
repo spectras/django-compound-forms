@@ -7,6 +7,11 @@ from .forms import MergingProxyForm
 
 ##############################################################################
 
+class InvalidFormsetsError(ValueError):
+    pass
+
+##############################################################################
+
 class SubFormSetsBuildMixin(BaseFormSet):
     formset_classes = OrderedDict()
 
@@ -32,21 +37,21 @@ class SubFormSetsBuildMixin(BaseFormSet):
 
 ##############################################################################
 
-class ModelSubFormSetsMixin(SubFormSetsBuildMixin):
+class InlineSubFormSetsMixin(SubFormSetsBuildMixin):
     def __init__(self, *args, **kwargs):
-        self.instances = kwargs.pop('instances')
-        super(ModelSubFormSetsMixin, self).__init__(*args, **kwargs)
+        self.instances = kwargs.pop('instances', {})
+        super(InlineSubFormSetsMixin, self).__init__(*args, **kwargs)
 
     def _construct_formset(self, name, **kwargs):
         defaults = {
             'instance': self.instances.get(name),
         }
         defaults.update(kwargs)
-        return super(ModelSubFormSetsMixin, self)._construct_formset(name, **defaults)
+        return super(InlineSubFormSetsMixin, self)._construct_formset(name, **defaults)
 
-    def save(self, only=None, commit=True):
+    def save(self, only=None, **kwargs):
         keys = self.formsets.keys() if only is None else only
-        return OrderedDict((name, self._save_formset(name, commit=commit)) for name in keys)
+        return OrderedDict((name, self._save_formset(name, **kwargs)) for name in keys)
 
     def _save_formset(self, name, **kwargs):
         return self.formsets[name].save(**kwargs)
@@ -55,7 +60,7 @@ class ModelSubFormSetsMixin(SubFormSetsBuildMixin):
 
 class SubFormSetsProxyMixin(BaseFormSet):
     form = MergingProxyForm
-    formset_group_fields = ()
+    formset_group_fields = OrderedDict()
     validate_max = False
 
     @property
@@ -80,44 +85,58 @@ class SubFormSetsProxyMixin(BaseFormSet):
         # Fill groups with forms from formsets
         first = True
         for formset_name, formset in self.formsets.items():
+            # Group initial forms by key (generated from fields in formset_group_fields)
             for form in formset.initial_forms:
-                key = tuple(form[field].field.initial
-                            for field in self.formset_group_fields)
+                key = tuple(form.initial.get(field, form.fields[field].initial)
+                            for field in self.formset_group_fields.keys())
                 if first:
                     groups[key] = {formset_name: form}
                 else:   # ensure a mismatch key raises an exception
                     groups[key][formset_name] = form
-            assert formset.initial_form_count() == len(groups), (
-                '%s != %s' % (formset.initial_form_count(), len(groups)))
 
+            # Check that formset grouping is correct
+            if not first:
+                if formset.initial_form_count() != len(groups):
+                    raise InvalidFormsetsError(
+                        'formsets do not have the same number of initial form groups: %d != %d',
+                        formset.initial_form_count(), len(groups)
+                    )
+                if len(formset.extra_forms) != len(extras):
+                    raise InvalidFormsetsError(
+                        'formsets do not have the same number of extra forms: %d != %d',
+                        len(formset.extra_forms), len(extras)
+                    )
+
+            # Simply group extra forms by their index
             for index, form in enumerate(formset.extra_forms):
                 if first:
                     extras.append({formset_name: form})
                 else:
                     extras[index][formset_name] = form
-            assert index == len(extras)-1
+
             first = False
 
-        linked_fields = list(self.formset_group_fields)
+        linked_fields = self.formset_group_fields.copy()
         if self.can_delete:
-            linked_fields.append('DELETE')
+            linked_fields['DELETE'] = None
 
-        forms = (tuple(self._construct_form(i, forms=group, linked_fields=tuple(linked_fields))
+        forms = (tuple(self._construct_form(i, forms=group, linked_fields=linked_fields)
                        for i, group in enumerate(groups.values()))
                  +
-                 tuple(self._construct_form(i, forms=group, linked_fields=tuple(linked_fields))
+                 tuple(self._construct_form(i, forms=group, linked_fields=linked_fields)
                        for i, group in enumerate(extras, len(groups))))
-
         return forms
 
     def initial_form_count(self):
         count = next(iter(self.formsets.values())).initial_form_count()
-        assert all(formset.initial_form_count() == count for formset in self.formsets.values())
+        if any(formset.initial_form_count() != count for formset in self.formsets.values()):
+            raise InvalidFormsetsError('initial_form_count()s differ amongst sub-formsets')
         return count
 
     def total_form_count(self):
         count = next(iter(self.formsets.values())).total_form_count()
-        assert all(formset.total_form_count() == count for formset in self.formsets.values())
+        if any(formset.total_form_count() != count for formset in self.formsets.values()):
+            raise InvalidFormsetsError('total_form_count()s differ amongst sub-formsets')
         return count
 
     def full_clean(self):
@@ -131,8 +150,8 @@ class SubFormSetsProxyMixin(BaseFormSet):
 
         unique_non_form_errors = set()
         for formset in self.formsets.values():
-            self._errors.append(formset.errors)
             unique_non_form_errors.update(formset.non_form_errors())
+            # do not add form errors as we will get them right after
         self._non_form_errors.extend(unique_non_form_errors)
 
         for form in self.forms:
@@ -160,10 +179,14 @@ class SubFormSetsProxyMixin(BaseFormSet):
 ##############################################################################
 
 class ProxyFormSet(SubFormSetsProxyMixin, BaseFormSet):
-    pass
+    def __init__(self, *args, **kwargs):
+        self.formsets = kwargs.pop('formsets')
+        self.formset_group_fields = self.formset_group_fields.copy()
+        self.formset_group_fields.update(kwargs.pop('formset_group_fields', {}))
+        super(ProxyFormSet, self).__init__(*args, **kwargs)
 
 class CompoundFormSet(SubFormSetsBuildMixin, SubFormSetsProxyMixin, BaseFormSet):
     pass
 
-class CompoundModelFormSet(ModelSubFormSetsMixin, SubFormSetsProxyMixin, BaseFormSet):
+class CompoundInlineFormSet(InlineSubFormSetsMixin, SubFormSetsProxyMixin, BaseFormSet):
     pass
