@@ -2,6 +2,7 @@ from django.forms import Form, ModelForm
 from django.forms.forms import BaseForm, NON_FIELD_ERRORS
 from django.utils.functional import cached_property
 from collections import OrderedDict
+import copy
 
 ##############################################################################
 
@@ -14,7 +15,8 @@ class SubFormsProxyMixin(BaseForm):
         super(SubFormsProxyMixin, self).__init__(*args, **kwargs)
         for name, field in self.linked_fields.items():
             if field is not None:
-                self.fields[name] = field
+                # as it can be modified, each form must have it own field instance
+                self.fields[name] = copy.deepcopy(field)
         if pull_linked_fields:
             self.pull_linked_fields()
 
@@ -27,7 +29,7 @@ class SubFormsProxyMixin(BaseForm):
                 if name not in self.fields:  # field will be added by add_field
                     continue                 # on some formset, just skip pulling it
                 initials = tuple(
-                    form.initial.get(name, self.fields[name].initial)
+                    form.initial.get(name, form.fields[name].initial)
                     for form in self.forms.values()
                     if name in form.fields
                 )
